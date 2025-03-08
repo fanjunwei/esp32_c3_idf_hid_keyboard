@@ -20,6 +20,7 @@
 #define COL1_PIN GPIO_NUM_12
 #define COL2_PIN GPIO_NUM_13
 #define COL3_PIN GPIO_NUM_10
+#define DEBOUNCE_THRESHOLD 3
 
 // 按键位置结构体
 typedef struct {
@@ -41,5 +42,12 @@ button_state_t scan_button(void);
 
 // 获取按键对应的键码
 uint8_t get_keycode_from_button(uint8_t row, uint8_t col);
+
+// 按键状态结构体
+typedef struct {
+    uint8_t current : 1;
+    uint8_t previous : 1;
+    uint8_t count : 6;
+} key_state;
 
 #endif /* BUTTON_SCAN_H */ 

@@ -319,9 +319,9 @@ void esp_hidd_send_key_value(uint8_t keycode, bool key_pressed);
 void esp_hidd_send_keys(uint8_t *keycodes, uint8_t num_keys);
 void esp_hidd_send_modifier_key_value(uint8_t modifier, uint8_t keycode,
                                       bool key_pressed);
-void ble_hid_demo_task(void *pvParameters);
+void ble_hid_task(void *pvParameters);
 
-void ble_hid_demo_task(void *pvParameters) {
+void ble_hid_task(void *pvParameters) {
   int reconnect_counter = 0;
   bool need_reconnect = false;
 
@@ -395,12 +395,13 @@ void ble_hid_demo_task(void *pvParameters) {
       last_button = button;
     }
     
-    vTaskDelay(pdMS_TO_TICKS(20));  // 20ms扫描间隔
+    // vTaskDelay(pdMS_TO_TICKS(20));  // 20ms扫描间隔
+    vTaskDelay(pdMS_TO_TICKS(5000)); 
   }
 }
 
 void ble_hid_task_start_up(void) {
-  xTaskCreate(ble_hid_demo_task, "ble_hid_demo_task", 2 * 1024, NULL,
+  xTaskCreate(ble_hid_task, "ble_hid_task", 2 * 1024, NULL,
               configMAX_PRIORITIES - 3, &s_ble_hid_param.task_hdl);
 }
 
