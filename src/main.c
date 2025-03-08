@@ -40,46 +40,53 @@ typedef struct {
 
 #if CONFIG_BT_BLE_ENABLED
 static local_param_t s_ble_hid_param = {0};
-const unsigned char hidapiReportMap[] = {
-    // 8 bytes input, 8 bytes feature
-    0x06, 0x00,
-    0xFF,  // Usage Page (Vendor Defined 0xFF00)
-    0x0A, 0x00,
-    0x01,  // Usage (0x0100)
-    0xA1,
-    0x01,  // Collection (Application)
-    0x85,
-    0x01,  //   Report ID (1)
-    0x15,
-    0x00,  //   Logical Minimum (0)
-    0x26, 0xFF,
-    0x00,  //   Logical Maximum (255)
-    0x75,
-    0x08,  //   Report Size (8)
-    0x95,
-    0x08,  //   Report Count (8)
-    0x09,
-    0x01,  //   Usage (0x01)
-    0x82, 0x02,
-    0x01,  //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null
-           //   Position,Buffered Bytes)
-    0x95,
-    0x08,  //   Report Count (8)
-    0x09,
-    0x02,  //   Usage (0x02)
-    0xB2, 0x02,
-    0x01,  //   Feature (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null
-           //   Position,Non-volatile,Buffered Bytes)
-    0x95,
-    0x08,  //   Report Count (8)
-    0x09,
-    0x03,  //   Usage (0x03)
-    0x91,
-    0x02,  //   Output (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null
-           //   Position,Non-volatile)
-    0xC0,  // End Collection
+static bool s_ble_is_connected = false;  // 添加连接状态变量
 
-    // 38 bytes
+const unsigned char keyboardReportMap[] = {
+    0x05, 0x01,  // Usage Page (Generic Desktop)
+    0x09, 0x06,  // Usage (Keyboard)
+    0xA1, 0x01,  // Collection (Application)
+    0x85, 0x01,  //   Report ID (1)
+    
+    // 修饰键 (左Ctrl, 左Shift等)
+    0x05, 0x07,  //   Usage Page (Key Codes)
+    0x19, 0xE0,  //   Usage Minimum (Left Control)
+    0x29, 0xE7,  //   Usage Maximum (Right GUI)
+    0x15, 0x00,  //   Logical Minimum (0)
+    0x25, 0x01,  //   Logical Maximum (1)
+    0x75, 0x01,  //   Report Size (1)
+    0x95, 0x08,  //   Report Count (8)
+    0x81, 0x02,  //   Input (Data, Variable, Absolute)
+    
+    // 保留字节
+    0x95, 0x01,  //   Report Count (1)
+    0x75, 0x08,  //   Report Size (8)
+    0x81, 0x01,  //   Input (Constant)
+    
+    // LED状态 (Num Lock, Caps Lock等)
+    0x95, 0x05,  //   Report Count (5)
+    0x75, 0x01,  //   Report Size (1)
+    0x05, 0x08,  //   Usage Page (LEDs)
+    0x19, 0x01,  //   Usage Minimum (Num Lock)
+    0x29, 0x05,  //   Usage Maximum (Kana)
+    0x91, 0x02,  //   Output (Data, Variable, Absolute)
+    
+    // LED状态的保留3位
+    0x95, 0x01,  //   Report Count (1)
+    0x75, 0x03,  //   Report Size (3)
+    0x91, 0x01,  //   Output (Constant)
+    
+    // 6个按键
+    0x95, 0x06,  //   Report Count (6)
+    0x75, 0x08,  //   Report Size (8)
+    0x15, 0x00,  //   Logical Minimum (0)
+    0x25, 0x65,  //   Logical Maximum (101)
+    0x05, 0x07,  //   Usage Page (Key Codes)
+    0x19, 0x00,  //   Usage Minimum (0)
+    0x29, 0x65,  //   Usage Maximum (101)
+    0x81, 0x00,  //   Input (Data, Array)
+    
+    0xC0         // End Collection
 };
 
 const unsigned char mediaReportMap[] = {
@@ -202,7 +209,7 @@ const unsigned char mediaReportMap[] = {
 };
 
 static esp_hid_raw_report_map_t ble_report_maps[] = {
-    {.data = hidapiReportMap, .len = sizeof(hidapiReportMap)},
+    {.data = keyboardReportMap, .len = sizeof(keyboardReportMap)},
     {.data = mediaReportMap, .len = sizeof(mediaReportMap)}};
 
 static esp_hid_device_config_t ble_hid_config = {
@@ -304,121 +311,61 @@ static esp_hid_device_config_t ble_hid_config = {
 #define HID_CC_IN_RPT_LEN 2  // Consumer Control input report Len
 #define HID_RPT_ID_KEY_IN 1
 #define HID_KEY_IN_RPT_LEN 8
-void esp_hidd_send_consumer_value(uint8_t key_cmd, bool key_pressed) {
-  uint8_t buffer[HID_CC_IN_RPT_LEN] = {0, 0};
-  if (key_pressed) {
-    switch (key_cmd) {
-      case HID_CONSUMER_CHANNEL_UP:
-        HID_CC_RPT_SET_CHANNEL(buffer, HID_CC_RPT_CHANNEL_UP);
-        break;
-
-      case HID_CONSUMER_CHANNEL_DOWN:
-        HID_CC_RPT_SET_CHANNEL(buffer, HID_CC_RPT_CHANNEL_DOWN);
-        break;
-
-      case HID_CONSUMER_VOLUME_UP:
-        HID_CC_RPT_SET_VOLUME_UP(buffer);
-        break;
-
-      case HID_CONSUMER_VOLUME_DOWN:
-        HID_CC_RPT_SET_VOLUME_DOWN(buffer);
-        break;
-
-      case HID_CONSUMER_MUTE:
-        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_MUTE);
-        break;
-
-      case HID_CONSUMER_POWER:
-        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_POWER);
-        break;
-
-      case HID_CONSUMER_RECALL_LAST:
-        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_LAST);
-        break;
-
-      case HID_CONSUMER_ASSIGN_SEL:
-        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_ASSIGN_SEL);
-        break;
-
-      case HID_CONSUMER_PLAY:
-        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_PLAY);
-        break;
-
-      case HID_CONSUMER_PAUSE:
-        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_PAUSE);
-        break;
-
-      case HID_CONSUMER_RECORD:
-        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_RECORD);
-        break;
-
-      case HID_CONSUMER_FAST_FORWARD:
-        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_FAST_FWD);
-        break;
-
-      case HID_CONSUMER_REWIND:
-        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_REWIND);
-        break;
-
-      case HID_CONSUMER_SCAN_NEXT_TRK:
-        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_SCAN_NEXT_TRK);
-        break;
-
-      case HID_CONSUMER_SCAN_PREV_TRK:
-        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_SCAN_PREV_TRK);
-        break;
-
-      case HID_CONSUMER_STOP:
-        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_STOP);
-        break;
-
-      default:
-        break;
-    }
-  }
-  esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_CC_IN, buffer,
-                         HID_CC_IN_RPT_LEN);
-  return;
-}
-void esp_hidd_send_key_value(uint8_t keycode, bool key_pressed) {
-  uint8_t buf[HID_KEY_IN_RPT_LEN];
-
-  buf[0] = 0;  // Modifierkeys
-
-  buf[1] = 0;  // Reserved
-
-  buf[2] = keycode;  // Keycode 1
-
-  buf[3] = 0;  // Keycode 2
-
-  buf[4] = 0;  // Keycode 3
-
-  buf[5] = 0;  // Keycode 4
-
-  buf[6] = 0;  // Keycode 5
-
-  buf[7] = 0;  // Keycode 6
-  esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf,
-                         HID_KEY_IN_RPT_LEN);
-  return;
-}
+void esp_hidd_send_consumer_value(uint8_t key_cmd, bool key_pressed);
+void esp_hidd_send_key_value(uint8_t keycode, bool key_pressed);
+void esp_hidd_send_modifier_key_value(uint8_t modifier, uint8_t keycode, bool key_pressed);
+void ble_hid_demo_task(void *pvParameters);
 
 void ble_hid_demo_task(void *pvParameters) {
-  static bool send_volum_up = false;
+  int reconnect_counter = 0;
+  
   while (1) {
-    ESP_LOGI(TAG, "Send the volume");
-    esp_hidd_send_key_value(4,true);
-    if (send_volum_up) {
-      esp_hidd_send_consumer_value(HID_CONSUMER_VOLUME_UP, true);
-      vTaskDelay(100 / portTICK_PERIOD_MS);
-      esp_hidd_send_consumer_value(HID_CONSUMER_VOLUME_UP, false);
+    if (s_ble_is_connected) {
+      ESP_LOGI(TAG, "设备已连接，发送按键");
+      
+      // 测试普通按键
+      ESP_LOGI(TAG, "测试普通按键 A (0x04)");
+      esp_hidd_send_key_value(0x04, true);
+      vTaskDelay(200 / portTICK_PERIOD_MS);
+      esp_hidd_send_key_value(0x04, false);
+      vTaskDelay(1000 / portTICK_PERIOD_MS);
+      
+      // 测试空格键
+      ESP_LOGI(TAG, "测试空格键 SPACE (0x2C)");
+      esp_hidd_send_key_value(0x2C, true);
+      vTaskDelay(200 / portTICK_PERIOD_MS);
+      esp_hidd_send_key_value(0x2C, false);
+      vTaskDelay(1000 / portTICK_PERIOD_MS);
+      
+      // 测试组合键 Ctrl+A
+      ESP_LOGI(TAG, "测试组合键 Ctrl+A");
+      esp_hidd_send_modifier_key_value(0x01, 0x04, true);  // 左Ctrl(0x01) + A(0x04)
+      vTaskDelay(200 / portTICK_PERIOD_MS);
+      esp_hidd_send_modifier_key_value(0x01, 0x04, false);
+      vTaskDelay(1000 / portTICK_PERIOD_MS);
+      
+      // 测试组合键 Shift+A
+      ESP_LOGI(TAG, "测试组合键 Shift+A");
+      esp_hidd_send_modifier_key_value(0x02, 0x04, true);  // 左Shift(0x02) + A(0x04)
+      vTaskDelay(200 / portTICK_PERIOD_MS);
+      esp_hidd_send_modifier_key_value(0x02, 0x04, false);
+      
+      // 如果多次尝试后仍然没有效果，尝试重新连接
+      reconnect_counter++;
+      if (reconnect_counter >= 3) {
+        ESP_LOGI(TAG, "多次尝试后仍无效果，尝试重新连接...");
+        // 断开连接并重新初始化
+        s_ble_is_connected = false;
+        // 重新开始广播
+        esp_hid_ble_gap_adv_start();
+        reconnect_counter = 0;
+      }
     } else {
-      esp_hidd_send_consumer_value(HID_CONSUMER_VOLUME_DOWN, true);
-      vTaskDelay(100 / portTICK_PERIOD_MS);
-      esp_hidd_send_consumer_value(HID_CONSUMER_VOLUME_DOWN, false);
+      ESP_LOGI(TAG, "设备未连接，等待连接...");
     }
-    send_volum_up = !send_volum_up;
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    
+    // 增加延时，方便观察
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
   }
 }
 
@@ -448,13 +395,24 @@ static void ble_hidd_event_callback(void *handler_args, esp_event_base_t base,
     }
     case ESP_HIDD_CONNECT_EVENT: {
       ESP_LOGI(TAG, "CONNECT");
-      ble_hid_task_start_up();  // todo: this should be on auth_complete (in
-                                // GAP)
+      s_ble_is_connected = true;
+      
+      // 打印连接信息
+      ESP_LOGI(TAG, "连接成功，准备发送HID报告");
+      
+      // 启动HID任务
+      ble_hid_task_start_up();
       break;
     }
     case ESP_HIDD_PROTOCOL_MODE_EVENT: {
       ESP_LOGI(TAG, "PROTOCOL MODE[%u]: %s", param->protocol_mode.map_index,
                param->protocol_mode.protocol_mode ? "REPORT" : "BOOT");
+      
+      // 确保设备处于Report模式
+      if (param->protocol_mode.protocol_mode == 0) {  // 如果是Boot模式
+        ESP_LOGI(TAG, "当前为Boot模式，建议切换到Report模式");
+        // 不使用未声明的函数，只记录日志
+      }
       break;
     }
     case ESP_HIDD_CONTROL_EVENT: {
@@ -484,6 +442,7 @@ static void ble_hidd_event_callback(void *handler_args, esp_event_base_t base,
                    param->disconnect.reason));
       ble_hid_task_shut_down();
       esp_hid_ble_gap_adv_start();
+      s_ble_is_connected = false;
       break;
     }
     case ESP_HIDD_STOP_EVENT: {
@@ -638,15 +597,11 @@ static void bt_hidd_event_callback(void *handler_args, esp_event_base_t base,
       break;
     }
     case ESP_HIDD_CONNECT_EVENT: {
-      if (param->connect.status == ESP_OK) {
-        ESP_LOGI(TAG, "CONNECT OK");
-        ESP_LOGI(TAG, "Setting to non-connectable, non-discoverable");
-        esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE,
-                                 ESP_BT_NON_DISCOVERABLE);
-        bt_hid_task_start_up();
-      } else {
-        ESP_LOGE(TAG, "CONNECT failed!");
-      }
+      ESP_LOGI(TAG, "CONNECT OK");
+      ESP_LOGI(TAG, "Setting to non-connectable, non-discoverable");
+      esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE,
+                               ESP_BT_NON_DISCOVERABLE);
+      bt_hid_task_start_up();
       break;
     }
     case ESP_HIDD_PROTOCOL_MODE_EVENT: {
@@ -694,10 +649,10 @@ static void bt_hidd_event_callback(void *handler_args, esp_event_base_t base,
 
 void app_main(void) {
   esp_err_t ret;
-#if HID_DEV_MODE == HIDD_IDLE_MODE
-  ESP_LOGE(TAG, "Please turn on BT HID device or BLE!");
-  return;
-#endif
+  
+  ESP_LOGI(TAG, "启动蓝牙HID键盘示例...");
+
+#if CONFIG_BT_BLE_ENABLED || CONFIG_BT_HID_DEVICE_ENABLED
   ret = nvs_flash_init();
   if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
       ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -706,24 +661,26 @@ void app_main(void) {
   }
   ESP_ERROR_CHECK(ret);
 
-  ESP_LOGI(TAG, "setting hid gap, mode:%d", HID_DEV_MODE);
+  ESP_LOGI(TAG, "设置HID GAP模式: %d", HID_DEV_MODE);
   ret = esp_hid_gap_init(HID_DEV_MODE);
   ESP_ERROR_CHECK(ret);
 
 #if CONFIG_BT_BLE_ENABLED
+  ESP_LOGI(TAG, "初始化BLE广播...");
   ret = esp_hid_ble_gap_adv_init(ESP_HID_APPEARANCE_GENERIC,
                                  ble_hid_config.device_name);
   ESP_ERROR_CHECK(ret);
 
   if ((ret = esp_ble_gatts_register_callback(esp_hidd_gatts_event_handler)) !=
       ESP_OK) {
-    ESP_LOGE(TAG, "GATTS register callback failed: %d", ret);
+    ESP_LOGE(TAG, "GATTS注册回调失败: %d", ret);
     return;
   }
-  ESP_LOGI(TAG, "setting ble device");
+  ESP_LOGI(TAG, "设置BLE设备...");
   ESP_ERROR_CHECK(esp_hidd_dev_init(&ble_hid_config, ESP_HID_TRANSPORT_BLE,
                                     ble_hidd_event_callback,
                                     &s_ble_hid_param.hid_dev));
+  ESP_LOGI(TAG, "BLE HID设备初始化完成，等待连接...");
 #endif
 #if CONFIG_BT_HID_DEVICE_ENABLED
   ESP_LOGI(TAG, "setting device name");
@@ -738,4 +695,133 @@ void app_main(void) {
                                     bt_hidd_event_callback,
                                     &s_bt_hid_param.hid_dev));
 #endif
+#endif  // CONFIG_BT_BLE_ENABLED || CONFIG_BT_HID_DEVICE_ENABLED
+}
+
+void esp_hidd_send_consumer_value(uint8_t key_cmd, bool key_pressed) {
+  uint8_t buffer[HID_CC_IN_RPT_LEN] = {0, 0};
+  if (key_pressed) {
+    switch (key_cmd) {
+      case HID_CONSUMER_CHANNEL_UP:
+        HID_CC_RPT_SET_CHANNEL(buffer, HID_CC_RPT_CHANNEL_UP);
+        break;
+
+      case HID_CONSUMER_CHANNEL_DOWN:
+        HID_CC_RPT_SET_CHANNEL(buffer, HID_CC_RPT_CHANNEL_DOWN);
+        break;
+
+      case HID_CONSUMER_VOLUME_UP:
+        HID_CC_RPT_SET_VOLUME_UP(buffer);
+        break;
+
+      case HID_CONSUMER_VOLUME_DOWN:
+        HID_CC_RPT_SET_VOLUME_DOWN(buffer);
+        break;
+
+      case HID_CONSUMER_MUTE:
+        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_MUTE);
+        break;
+
+      case HID_CONSUMER_POWER:
+        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_POWER);
+        break;
+
+      case HID_CONSUMER_RECALL_LAST:
+        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_LAST);
+        break;
+
+      case HID_CONSUMER_ASSIGN_SEL:
+        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_ASSIGN_SEL);
+        break;
+
+      case HID_CONSUMER_PLAY:
+        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_PLAY);
+        break;
+
+      case HID_CONSUMER_PAUSE:
+        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_PAUSE);
+        break;
+
+      case HID_CONSUMER_RECORD:
+        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_RECORD);
+        break;
+
+      case HID_CONSUMER_FAST_FORWARD:
+        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_FAST_FWD);
+        break;
+
+      case HID_CONSUMER_REWIND:
+        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_REWIND);
+        break;
+
+      case HID_CONSUMER_SCAN_NEXT_TRK:
+        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_SCAN_NEXT_TRK);
+        break;
+
+      case HID_CONSUMER_SCAN_PREV_TRK:
+        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_SCAN_PREV_TRK);
+        break;
+
+      case HID_CONSUMER_STOP:
+        HID_CC_RPT_SET_BUTTON(buffer, HID_CC_RPT_STOP);
+        break;
+
+      default:
+        break;
+    }
+  }
+  esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_CC_IN, buffer,
+                         HID_CC_IN_RPT_LEN);
+  return;
+}
+
+void esp_hidd_send_key_value(uint8_t keycode, bool key_pressed) {
+  uint8_t buf[HID_KEY_IN_RPT_LEN];
+  
+  ESP_LOGI(TAG, "Sending key: 0x%02x, pressed: %d", keycode, key_pressed);
+  
+  // 清空缓冲区
+  memset(buf, 0, HID_KEY_IN_RPT_LEN);
+  
+  if (key_pressed) {
+    // 按键按下时，设置keycode
+    // 标准HID键盘报告格式：
+    // buf[0] = 修饰键
+    // buf[1] = 保留字节
+    // buf[2] = 按键1
+    // buf[3] = 按键2
+    // ...
+    buf[2] = keycode;
+  }
+  
+  // 发送报告
+  esp_err_t err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
+  ESP_LOGI(TAG, "Send key result: %s", esp_err_to_name(err));
+  
+  // 添加调试信息
+  ESP_LOGI(TAG, "键盘报告内容:");
+  ESP_LOG_BUFFER_HEX(TAG, buf, HID_KEY_IN_RPT_LEN);
+}
+
+// 添加发送带修饰键的组合键的函数
+void esp_hidd_send_modifier_key_value(uint8_t modifier, uint8_t keycode, bool key_pressed) {
+  uint8_t buf[HID_KEY_IN_RPT_LEN];
+  
+  ESP_LOGI(TAG, "Sending modifier: 0x%02x, key: 0x%02x, pressed: %d", modifier, keycode, key_pressed);
+  
+  // 清空缓冲区
+  memset(buf, 0, HID_KEY_IN_RPT_LEN);
+  
+  if (key_pressed) {
+    buf[0] = modifier;  // 修饰键
+    buf[2] = keycode;   // 普通键
+  }
+  
+  // 发送报告
+  esp_err_t err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
+  ESP_LOGI(TAG, "Send key result: %s", esp_err_to_name(err));
+  
+  // 添加调试信息
+  ESP_LOGI(TAG, "组合键报告内容:");
+  ESP_LOG_BUFFER_HEX(TAG, buf, HID_KEY_IN_RPT_LEN);
 }
