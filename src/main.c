@@ -50,7 +50,7 @@ const unsigned char keyboardReportMap[] = {
     0x09, 0x06,  // Usage (Keyboard)
     0xA1, 0x01,  // Collection (Application)
     0x85, 0x01,  //   Report ID (1)
-    
+
     // 修饰键 (左Ctrl, 左Shift等)
     0x05, 0x07,  //   Usage Page (Key Codes)
     0x19, 0xE0,  //   Usage Minimum (Left Control)
@@ -60,12 +60,12 @@ const unsigned char keyboardReportMap[] = {
     0x75, 0x01,  //   Report Size (1)
     0x95, 0x08,  //   Report Count (8)
     0x81, 0x02,  //   Input (Data, Variable, Absolute)
-    
+
     // 保留字节
     0x95, 0x01,  //   Report Count (1)
     0x75, 0x08,  //   Report Size (8)
     0x81, 0x01,  //   Input (Constant)
-    
+
     // LED状态 (Num Lock, Caps Lock等)
     0x95, 0x05,  //   Report Count (5)
     0x75, 0x01,  //   Report Size (1)
@@ -73,12 +73,12 @@ const unsigned char keyboardReportMap[] = {
     0x19, 0x01,  //   Usage Minimum (Num Lock)
     0x29, 0x05,  //   Usage Maximum (Kana)
     0x91, 0x02,  //   Output (Data, Variable, Absolute)
-    
+
     // LED状态的保留3位
     0x95, 0x01,  //   Report Count (1)
     0x75, 0x03,  //   Report Size (3)
     0x91, 0x01,  //   Output (Constant)
-    
+
     // 6个按键
     0x95, 0x06,  //   Report Count (6)
     0x75, 0x08,  //   Report Size (8)
@@ -88,8 +88,8 @@ const unsigned char keyboardReportMap[] = {
     0x19, 0x00,  //   Usage Minimum (0)
     0x29, 0x65,  //   Usage Maximum (101)
     0x81, 0x00,  //   Input (Data, Array)
-    
-    0xC0         // End Collection
+
+    0xC0  // End Collection
 };
 
 const unsigned char mediaReportMap[] = {
@@ -316,87 +316,77 @@ static esp_hid_device_config_t ble_hid_config = {
 #define HID_KEY_IN_RPT_LEN 8
 void esp_hidd_send_consumer_value(uint8_t key_cmd, bool key_pressed);
 void esp_hidd_send_key_value(uint8_t keycode, bool key_pressed);
-void esp_hidd_send_modifier_key_value(uint8_t modifier, uint8_t keycode, bool key_pressed);
+void esp_hidd_send_modifier_key_value(uint8_t modifier, uint8_t keycode,
+                                      bool key_pressed);
 void ble_hid_demo_task(void *pvParameters);
 
 void ble_hid_demo_task(void *pvParameters) {
   int reconnect_counter = 0;
   bool need_reconnect = false;
-  
+
   // 初始化按键扫描
   button_scan_init();
   ESP_LOGI(TAG, "按键扫描初始化完成");
-  
+
   // 上一次按键状态
   button_state_t last_button = {false, 0, 0};
-  
+
   while (1) {
-    if (s_ble_is_connected) {
+    button_state_t button = scan_button();
+    if (button.pressed) {
+      ESP_LOGI(TAG, "按键按下");
       if (need_reconnect) {
         // 如果之前标记了需要重连，但现在已经连接，重置标志
         need_reconnect = false;
         reconnect_counter = 0;
         ESP_LOGI(TAG, "连接已恢复，重置重连计数器");
       }
-      
-      ESP_LOGI(TAG, "test");
+
       // 扫描按键
-      button_state_t button = scan_button();
-      
       // 如果有按键被按下，且与上次不同
-      if (button.pressed && 
-          (last_button.pressed == false || 
-           last_button.row != button.row || 
+      if ((last_button.pressed == false || last_button.row != button.row ||
            last_button.col != button.col)) {
-        
-        // 获取对应的键码
-        uint8_t keycode = get_keycode_from_button(button.row, button.col);
-        
-        // 发送按键
-        ESP_LOGI(TAG, "发送按键: 0x%02x (行=%d, 列=%d)", keycode, button.row, button.col);
-        esp_hidd_send_key_value(keycode, true);
-        vTaskDelay(50 / portTICK_PERIOD_MS);
-        esp_hidd_send_key_value(keycode, false);
-        
-        // 更新上次按键状态
-        last_button = button;
-        
-        // 重置重连计数器
-        reconnect_counter = 0;
-      } 
+        if (!s_ble_is_connected) {
+          ESP_LOGI(TAG, "设备未连接，等待连接...");
+          reconnect_counter++;
+          if (reconnect_counter >= 3) {  // 增加到5次
+            ESP_LOGI(TAG, "多次尝试后仍无效果，准备重新连接...");
+            // 不立即断开连接，只标记需要重连
+            need_reconnect = true;
+            reconnect_counter = 0;
+          }
+          // 如果需要重连且当前未连接，尝试重新开始广播
+          if (need_reconnect) {
+            ESP_LOGI(TAG, "尝试重新开始广播...");
+            esp_hid_ble_gap_adv_start();
+            need_reconnect = false;  // 重置标志
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+          }
+        } else {
+          // 获取对应的键码
+          uint8_t keycode = get_keycode_from_button(button.row, button.col);
+
+          // 发送按键
+          ESP_LOGI(TAG, "发送按键: 0x%02x (行=%d, 列=%d)", keycode, button.row,
+                   button.col);
+          esp_hidd_send_key_value(keycode, true);
+          vTaskDelay(50 / portTICK_PERIOD_MS);
+          esp_hidd_send_key_value(keycode, false);
+
+          // 更新上次按键状态
+          last_button = button;
+        }
+
+      }
       // 如果没有按键被按下，但上次有
       else if (!button.pressed && last_button.pressed) {
         // 更新上次按键状态
         last_button.pressed = false;
       }
-      
+
       // 如果多次尝试后仍然没有效果，标记需要重新连接
-      if (reconnect_counter >= 50) {  // 增加到50次，约150秒
-        ESP_LOGI(TAG, "长时间无活动，准备重新连接...");
-        // 不立即断开连接，只标记需要重连
-        need_reconnect = true;
-        
-        // 暂停一段时间，避免频繁尝试
-        vTaskDelay(5000 / portTICK_PERIOD_MS);
-        reconnect_counter = 0;
-      }
-    } else {
-      ESP_LOGI(TAG, "设备未连接，等待连接...");
-      
-      // 如果需要重连且当前未连接，尝试重新开始广播
-      if (need_reconnect) {
-        ESP_LOGI(TAG, "尝试重新开始广播...");
-        esp_hid_ble_gap_adv_start();
-        need_reconnect = false;  // 重置标志
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-      }
-    }
-    
-    // 增加计数器
-    reconnect_counter++;
-    
-    // 短暂延时，避免CPU占用过高
-    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    } 
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
@@ -427,18 +417,16 @@ static void ble_hidd_event_callback(void *handler_args, esp_event_base_t base,
     case ESP_HIDD_CONNECT_EVENT: {
       ESP_LOGI(TAG, "CONNECT");
       s_ble_is_connected = true;
-      
+
       // 打印连接信息
       ESP_LOGI(TAG, "连接成功，准备发送HID报告");
-      
-      // 启动HID任务
-      ble_hid_task_start_up();
+
       break;
     }
     case ESP_HIDD_PROTOCOL_MODE_EVENT: {
       ESP_LOGI(TAG, "PROTOCOL MODE[%u]: %s", param->protocol_mode.map_index,
                param->protocol_mode.protocol_mode ? "REPORT" : "BOOT");
-      
+
       // 确保设备处于Report模式
       if (param->protocol_mode.protocol_mode == 0) {  // 如果是Boot模式
         ESP_LOGI(TAG, "当前为Boot模式，建议切换到Report模式");
@@ -471,16 +459,16 @@ static void ble_hidd_event_callback(void *handler_args, esp_event_base_t base,
                esp_hid_disconnect_reason_str(
                    esp_hidd_dev_transport_get(param->disconnect.dev),
                    param->disconnect.reason));
-      
+
       // 添加更多调试信息
       ESP_LOGI(TAG, "断开连接，原因: %d", param->disconnect.reason);
-      
+
       // 关闭HID任务
       ble_hid_task_shut_down();
-      
+
       // 设置连接状态
       s_ble_is_connected = false;
-      
+
       // 延迟一段时间再重新开始广播
       vTaskDelay(1000 / portTICK_PERIOD_MS);
       ESP_LOGI(TAG, "重新开始广播...");
@@ -641,8 +629,7 @@ static void bt_hidd_event_callback(void *handler_args, esp_event_base_t base,
     case ESP_HIDD_CONNECT_EVENT: {
       ESP_LOGI(TAG, "CONNECT OK");
       ESP_LOGI(TAG, "Setting to non-connectable, non-discoverable");
-      esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE,
-                               ESP_BT_NON_DISCOVERABLE);
+      esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
       bt_hid_task_start_up();
       break;
     }
@@ -691,7 +678,7 @@ static void bt_hidd_event_callback(void *handler_args, esp_event_base_t base,
 
 void app_main(void) {
   esp_err_t ret;
-  
+
   ESP_LOGI(TAG, "启动蓝牙HID键盘示例...");
 
 #if CONFIG_BT_BLE_ENABLED || CONFIG_BT_HID_DEVICE_ENABLED
@@ -710,8 +697,7 @@ void app_main(void) {
 #if CONFIG_BT_BLE_ENABLED
   ESP_LOGI(TAG, "初始化BLE广播...");
   // 使用键盘外观 (0x03C1 = 961 = Keyboard)
-  ret = esp_hid_ble_gap_adv_init(961,
-                                 ble_hid_config.device_name);
+  ret = esp_hid_ble_gap_adv_init(961, ble_hid_config.device_name);
   ESP_ERROR_CHECK(ret);
 
   if ((ret = esp_ble_gatts_register_callback(esp_hidd_gatts_event_handler)) !=
@@ -724,6 +710,8 @@ void app_main(void) {
                                     ble_hidd_event_callback,
                                     &s_ble_hid_param.hid_dev));
   ESP_LOGI(TAG, "BLE HID设备初始化完成，等待连接...");
+  // 启动HID任务
+  ble_hid_task_start_up();
 #endif
 #if CONFIG_BT_HID_DEVICE_ENABLED
   ESP_LOGI(TAG, "setting device name");
@@ -820,12 +808,12 @@ void esp_hidd_send_consumer_value(uint8_t key_cmd, bool key_pressed) {
 
 void esp_hidd_send_key_value(uint8_t keycode, bool key_pressed) {
   uint8_t buf[HID_KEY_IN_RPT_LEN];
-  
+
   ESP_LOGI(TAG, "Sending key: 0x%02x, pressed: %d", keycode, key_pressed);
-  
+
   // 清空缓冲区
   memset(buf, 0, HID_KEY_IN_RPT_LEN);
-  
+
   if (key_pressed) {
     // 按键按下时，设置keycode
     // 标准HID键盘报告格式：
@@ -836,51 +824,57 @@ void esp_hidd_send_key_value(uint8_t keycode, bool key_pressed) {
     // ...
     buf[2] = keycode;
   }
-  
+
   // 发送报告
-  esp_err_t err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
+  esp_err_t err = esp_hidd_dev_input_set(
+      s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
   ESP_LOGI(TAG, "Send key result: %s", esp_err_to_name(err));
-  
+
   // 添加调试信息
   ESP_LOGI(TAG, "键盘报告内容:");
   ESP_LOG_BUFFER_HEX(TAG, buf, HID_KEY_IN_RPT_LEN);
-  
+
   // 对于Mac，只在按键释放时发送一个额外的空报告
   if (!key_pressed && keycode != 0) {
     vTaskDelay(10 / portTICK_PERIOD_MS);
     memset(buf, 0, HID_KEY_IN_RPT_LEN);
-    err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
+    err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN,
+                                 buf, HID_KEY_IN_RPT_LEN);
     ESP_LOGI(TAG, "Send empty report result: %s", esp_err_to_name(err));
   }
 }
 
 // 添加发送带修饰键的组合键的函数
-void esp_hidd_send_modifier_key_value(uint8_t modifier, uint8_t keycode, bool key_pressed) {
+void esp_hidd_send_modifier_key_value(uint8_t modifier, uint8_t keycode,
+                                      bool key_pressed) {
   uint8_t buf[HID_KEY_IN_RPT_LEN];
-  
-  ESP_LOGI(TAG, "Sending modifier: 0x%02x, key: 0x%02x, pressed: %d", modifier, keycode, key_pressed);
-  
+
+  ESP_LOGI(TAG, "Sending modifier: 0x%02x, key: 0x%02x, pressed: %d", modifier,
+           keycode, key_pressed);
+
   // 清空缓冲区
   memset(buf, 0, HID_KEY_IN_RPT_LEN);
-  
+
   if (key_pressed) {
     buf[0] = modifier;  // 修饰键
     buf[2] = keycode;   // 普通键
   }
-  
+
   // 发送报告
-  esp_err_t err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
+  esp_err_t err = esp_hidd_dev_input_set(
+      s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
   ESP_LOGI(TAG, "Send key result: %s", esp_err_to_name(err));
-  
+
   // 添加调试信息
   ESP_LOGI(TAG, "组合键报告内容:");
   ESP_LOG_BUFFER_HEX(TAG, buf, HID_KEY_IN_RPT_LEN);
-  
+
   // 对于Mac，只在按键释放时发送一个额外的空报告
   if (!key_pressed && (modifier != 0 || keycode != 0)) {
     vTaskDelay(10 / portTICK_PERIOD_MS);
     memset(buf, 0, HID_KEY_IN_RPT_LEN);
-    err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
+    err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN,
+                                 buf, HID_KEY_IN_RPT_LEN);
     ESP_LOGI(TAG, "Send empty report result: %s", esp_err_to_name(err));
   }
 }
