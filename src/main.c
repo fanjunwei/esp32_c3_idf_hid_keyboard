@@ -333,6 +333,7 @@ void ble_hid_task(void *pvParameters) {
   button_state_t last_button = {0};
   uint8_t keycodes[MAX_KEYS];
 
+
   while (1) {
     button_state_t button = scan_button();
     
@@ -395,8 +396,8 @@ void ble_hid_task(void *pvParameters) {
       last_button = button;
     }
     
-    // vTaskDelay(pdMS_TO_TICKS(20));  // 20ms扫描间隔
-    vTaskDelay(pdMS_TO_TICKS(5000)); 
+    vTaskDelay(pdMS_TO_TICKS(20));  // 20ms扫描间隔
+    // vTaskDelay(pdMS_TO_TICKS(5000)); 
   }
 }
 
