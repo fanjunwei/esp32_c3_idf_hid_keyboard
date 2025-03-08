@@ -216,7 +216,7 @@ static esp_hid_device_config_t ble_hid_config = {
     .vendor_id = 0x16C0,
     .product_id = 0x05DF,
     .version = 0x0100,
-    .device_name = "MY KEYBOARD",
+    .device_name = "BLE KEYBOARD",
     .manufacturer_name = "Espressif",
     .serial_number = "1234567890",
     .report_maps = ble_report_maps,
@@ -667,7 +667,8 @@ void app_main(void) {
 
 #if CONFIG_BT_BLE_ENABLED
   ESP_LOGI(TAG, "初始化BLE广播...");
-  ret = esp_hid_ble_gap_adv_init(ESP_HID_APPEARANCE_GENERIC,
+  // 使用键盘外观 (0x03C1 = 961 = Keyboard)
+  ret = esp_hid_ble_gap_adv_init(961,
                                  ble_hid_config.device_name);
   ESP_ERROR_CHECK(ret);
 
@@ -801,6 +802,14 @@ void esp_hidd_send_key_value(uint8_t keycode, bool key_pressed) {
   // 添加调试信息
   ESP_LOGI(TAG, "键盘报告内容:");
   ESP_LOG_BUFFER_HEX(TAG, buf, HID_KEY_IN_RPT_LEN);
+  
+  // 对于Mac，需要发送一个额外的空报告来表示按键释放
+  if (!key_pressed) {
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    memset(buf, 0, HID_KEY_IN_RPT_LEN);
+    err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
+    ESP_LOGI(TAG, "Send empty report result: %s", esp_err_to_name(err));
+  }
 }
 
 // 添加发送带修饰键的组合键的函数
@@ -824,4 +833,12 @@ void esp_hidd_send_modifier_key_value(uint8_t modifier, uint8_t keycode, bool ke
   // 添加调试信息
   ESP_LOGI(TAG, "组合键报告内容:");
   ESP_LOG_BUFFER_HEX(TAG, buf, HID_KEY_IN_RPT_LEN);
+  
+  // 对于Mac，需要发送一个额外的空报告来表示按键释放
+  if (!key_pressed) {
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    memset(buf, 0, HID_KEY_IN_RPT_LEN);
+    err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
+    ESP_LOGI(TAG, "Send empty report result: %s", esp_err_to_name(err));
+  }
 }
