@@ -31,29 +31,35 @@ void button_scan_init(void) {
     ESP_LOGI(TAG, "初始化按键扫描");
     
     // 配置行引脚为输出
+    uint64_t pin_bit_mask = 0;
     for (int i = 0; i < ROW_NUM; i++) {
-        gpio_config_t io_conf = {
-            .pin_bit_mask = (1ULL << row_pins[i]),
-            .mode = GPIO_MODE_OUTPUT,
-            .pull_up_en = GPIO_PULLUP_DISABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE
-        };
-        gpio_config(&io_conf);
+        pin_bit_mask |= (1ULL << row_pins[i]);
+    }
+    gpio_config_t io_conf = {
+        .pin_bit_mask = pin_bit_mask,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io_conf);
+    for (int i = 0; i < ROW_NUM; i++) {
         gpio_set_level(row_pins[i], 1); // 默认设置为高电平
     }
-    
+    vTaskDelay(pdMS_TO_TICKS(20));
+    pin_bit_mask = 0;
     // 配置列引脚为输入，启用上拉电阻
     for (int i = 0; i < COL_NUM; i++) {
-        gpio_config_t io_conf = {
-            .pin_bit_mask = (1ULL << col_pins[i]),
-            .mode = GPIO_MODE_INPUT,
-            .pull_up_en = GPIO_PULLUP_ENABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE
-        };
-        gpio_config(&io_conf);
+        pin_bit_mask |= (1ULL << col_pins[i]);
     }
+    gpio_config_t io_conf2 = {
+        .pin_bit_mask = pin_bit_mask,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io_conf2);
 }
 
 // 检查特定行列的按键是否被按下

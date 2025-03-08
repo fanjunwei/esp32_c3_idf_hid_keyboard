@@ -14,11 +14,11 @@
 // 按键矩阵引脚定义
 #define ROW1_PIN GPIO_NUM_6
 #define ROW2_PIN GPIO_NUM_8
-#define ROW3_PIN GPIO_NUM_11
+#define ROW3_PIN GPIO_NUM_2
 
 #define COL1_PIN GPIO_NUM_12
 #define COL2_PIN GPIO_NUM_13
-#define COL3_PIN GPIO_NUM_18
+#define COL3_PIN GPIO_NUM_10
 
 // 按键状态结构体
 typedef struct {
