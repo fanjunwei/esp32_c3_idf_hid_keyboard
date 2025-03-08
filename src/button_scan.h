@@ -10,6 +10,7 @@
 // 按键矩阵定义
 #define ROW_NUM 3
 #define COL_NUM 3
+#define MAX_KEYS 6  // 最多支持6个按键同时按下
 
 // 按键矩阵引脚定义
 #define ROW1_PIN GPIO_NUM_6
@@ -20,11 +21,16 @@
 #define COL2_PIN GPIO_NUM_13
 #define COL3_PIN GPIO_NUM_10
 
-// 按键状态结构体
+// 按键位置结构体
 typedef struct {
-    bool pressed;
     uint8_t row;
     uint8_t col;
+} key_position_t;
+
+// 按键状态结构体
+typedef struct {
+    uint8_t num_keys;                    // 当前按下的按键数量
+    key_position_t keys[MAX_KEYS];       // 按下的按键位置数组
 } button_state_t;
 
 // 初始化按键扫描

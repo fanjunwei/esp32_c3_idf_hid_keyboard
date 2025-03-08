@@ -316,6 +316,7 @@ static esp_hid_device_config_t ble_hid_config = {
 #define HID_KEY_IN_RPT_LEN 8
 void esp_hidd_send_consumer_value(uint8_t key_cmd, bool key_pressed);
 void esp_hidd_send_key_value(uint8_t keycode, bool key_pressed);
+void esp_hidd_send_keys(uint8_t *keycodes, uint8_t num_keys);
 void esp_hidd_send_modifier_key_value(uint8_t modifier, uint8_t keycode,
                                       bool key_pressed);
 void ble_hid_demo_task(void *pvParameters);
@@ -329,64 +330,72 @@ void ble_hid_demo_task(void *pvParameters) {
   ESP_LOGI(TAG, "按键扫描初始化完成");
 
   // 上一次按键状态
-  button_state_t last_button = {false, 0, 0};
+  button_state_t last_button = {0};
+  uint8_t keycodes[MAX_KEYS];
 
   while (1) {
     button_state_t button = scan_button();
-    if (button.pressed) {
-      ESP_LOGI(TAG, "按键按下");
+    
+    if (button.num_keys > 0) {
+      ESP_LOGI(TAG, "检测到%d个按键按下", button.num_keys);
+      
       if (need_reconnect) {
-        // 如果之前标记了需要重连，但现在已经连接，重置标志
         need_reconnect = false;
         reconnect_counter = 0;
         ESP_LOGI(TAG, "连接已恢复，重置重连计数器");
       }
 
-      // 扫描按键
-      // 如果有按键被按下，且与上次不同
-      if ((last_button.pressed == false || last_button.row != button.row ||
-           last_button.col != button.col)) {
-        if (!s_ble_is_connected) {
-          ESP_LOGI(TAG, "设备未连接，等待连接...");
-          reconnect_counter++;
-          if (reconnect_counter >= 3) {  // 增加到5次
-            ESP_LOGI(TAG, "多次尝试后仍无效果，准备重新连接...");
-            // 不立即断开连接，只标记需要重连
-            need_reconnect = true;
-            reconnect_counter = 0;
+      if (!s_ble_is_connected) {
+        ESP_LOGI(TAG, "设备未连接，等待连接...");
+        reconnect_counter++;
+        if (reconnect_counter >= 3) {
+          ESP_LOGI(TAG, "多次尝试后仍无效果，准备重新连接...");
+          need_reconnect = true;
+          reconnect_counter = 0;
+        }
+        if (need_reconnect) {
+          ESP_LOGI(TAG, "尝试重新开始广播...");
+          esp_hid_ble_gap_adv_start();
+          need_reconnect = false;
+          vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
+      } else {
+        // 检查按键状态是否改变
+        bool state_changed = (button.num_keys != last_button.num_keys);
+        if (!state_changed) {
+          for (int i = 0; i < button.num_keys; i++) {
+            if (button.keys[i].row != last_button.keys[i].row ||
+                button.keys[i].col != last_button.keys[i].col) {
+              state_changed = true;
+              break;
+            }
           }
-          // 如果需要重连且当前未连接，尝试重新开始广播
-          if (need_reconnect) {
-            ESP_LOGI(TAG, "尝试重新开始广播...");
-            esp_hid_ble_gap_adv_start();
-            need_reconnect = false;  // 重置标志
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
+        }
+        
+        if (state_changed) {
+          // 获取所有按下按键的键码
+          for (int i = 0; i < button.num_keys; i++) {
+            keycodes[i] = get_keycode_from_button(
+                button.keys[i].row, button.keys[i].col);
+            ESP_LOGI(TAG, "按键 %d: 行=%d, 列=%d, 键码=0x%02x",
+                    i, button.keys[i].row, button.keys[i].col, keycodes[i]);
           }
-        } else {
-          // 获取对应的键码
-          uint8_t keycode = get_keycode_from_button(button.row, button.col);
-
-          // 发送按键
-          ESP_LOGI(TAG, "发送按键: 0x%02x (行=%d, 列=%d)", keycode, button.row,
-                   button.col);
-          esp_hidd_send_key_value(keycode, true);
-          vTaskDelay(50 / portTICK_PERIOD_MS);
-          esp_hidd_send_key_value(keycode, false);
-
+          
+          // 发送所有按键
+          esp_hidd_send_keys(keycodes, button.num_keys);
+          
           // 更新上次按键状态
           last_button = button;
         }
-
       }
-      // 如果没有按键被按下，但上次有
-      else if (!button.pressed && last_button.pressed) {
-        // 更新上次按键状态
-        last_button.pressed = false;
-      }
-
-      // 如果多次尝试后仍然没有效果，标记需要重新连接
-    } 
-    vTaskDelay(pdMS_TO_TICKS(100));
+    } else if (last_button.num_keys > 0) {
+      // 所有按键释放
+      ESP_LOGI(TAG, "所有按键释放");
+      esp_hidd_send_keys(NULL, 0);
+      last_button = button;
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(20));  // 20ms扫描间隔
   }
 }
 
@@ -842,6 +851,40 @@ void esp_hidd_send_key_value(uint8_t keycode, bool key_pressed) {
                                  buf, HID_KEY_IN_RPT_LEN);
     ESP_LOGI(TAG, "Send empty report result: %s", esp_err_to_name(err));
   }
+}
+
+void esp_hidd_send_keys(uint8_t *keycodes, uint8_t num_keys) {
+  uint8_t buf[HID_KEY_IN_RPT_LEN];
+  
+  ESP_LOGI(TAG, "Sending %d keys", num_keys);
+  
+  // 清空缓冲区
+  memset(buf, 0, HID_KEY_IN_RPT_LEN);
+  
+  // 最多发送6个按键
+  num_keys = (num_keys > 6) ? 6 : num_keys;
+  
+  // 填充按键数据
+  for (int i = 0; i < num_keys; i++) {
+    buf[2 + i] = keycodes[i];
+    ESP_LOGI(TAG, "Key %d: 0x%02x", i, keycodes[i]);
+  }
+  
+  // 发送报告
+  esp_err_t err = esp_hidd_dev_input_set(
+      s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
+  ESP_LOGI(TAG, "Send keys result: %s", esp_err_to_name(err));
+  
+  // 添加调试信息
+  ESP_LOGI(TAG, "键盘报告内容:");
+  ESP_LOG_BUFFER_HEX(TAG, buf, HID_KEY_IN_RPT_LEN);
+  
+  // 发送空报告
+  vTaskDelay(10 / portTICK_PERIOD_MS);
+  memset(buf, 0, HID_KEY_IN_RPT_LEN);
+  err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN,
+                             buf, HID_KEY_IN_RPT_LEN);
+  ESP_LOGI(TAG, "Send empty report result: %s", esp_err_to_name(err));
 }
 
 // 添加发送带修饰键的组合键的函数

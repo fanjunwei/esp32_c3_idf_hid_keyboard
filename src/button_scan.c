@@ -62,41 +62,52 @@ void button_scan_init(void) {
     gpio_config(&io_conf2);
 }
 
-// 检查特定行列的按键是否被按下
 static bool is_button_pressed(uint8_t row, uint8_t col) {
-    // 将当前行设置为低电平
-    for (int i = 0; i < ROW_NUM; i++) {
-        gpio_set_level(row_pins[i], 1); // 所有行设为高电平
+    static uint8_t last_row = 0xFF;  // 记录上次扫描的行
+    
+    // 只有当切换到不同的行时才改变GPIO状态
+    if (row != last_row) {
+        // 将所有行设为高电平
+        for (int i = 0; i < ROW_NUM; i++) {
+            gpio_set_level(row_pins[i], 1);
+        }
+        // 将当前行设为低电平
+        gpio_set_level(row_pins[row], 0);
+        last_row = row;
+        
+        // 给一个短暂的延时让电平稳定
+        vTaskDelay(1 / portTICK_PERIOD_MS);
     }
-    gpio_set_level(row_pins[row], 0); // 当前行设为低电平
     
     // 读取列状态
-    vTaskDelay(1 / portTICK_PERIOD_MS); // 短暂延时，等待电平稳定
     int col_state = gpio_get_level(col_pins[col]);
-    
-    // 如果列为低电平，表示按键被按下
     return (col_state == 0);
 }
 
 button_state_t scan_button(void) {
-    button_state_t result = {false, 0, 0};
+    button_state_t result = {0};  // 初始化为0个按键
+    static TickType_t last_scan_time = 0;
+    TickType_t current_time = xTaskGetTickCount();
+    
+    // 限制扫描频率，每20ms扫描一次
+    if ((current_time - last_scan_time) < pdMS_TO_TICKS(20)) {
+        return result;
+    }
+    last_scan_time = current_time;
     
     // 扫描所有按键
     for (int row = 0; row < ROW_NUM; row++) {
         for (int col = 0; col < COL_NUM; col++) {
             if (is_button_pressed(row, col)) {
-                result.pressed = true;
-                result.row = row;
-                result.col = col;
-                ESP_LOGI(TAG, "按键按下: 行=%d, 列=%d", row, col);
-                return result; // 找到第一个按下的按键就返回
+                // 如果还没有达到最大按键数，添加这个按键
+                if (result.num_keys < MAX_KEYS) {
+                    result.keys[result.num_keys].row = row;
+                    result.keys[result.num_keys].col = col;
+                    result.num_keys++;
+                    ESP_LOGI(TAG, "按键按下: 行=%d, 列=%d", row, col);
+                }
             }
         }
-    }
-    
-    // 恢复所有行为高电平
-    for (int i = 0; i < ROW_NUM; i++) {
-        gpio_set_level(row_pins[i], 1);
     }
     
     return result;
