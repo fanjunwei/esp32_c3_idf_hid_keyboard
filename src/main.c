@@ -318,9 +318,17 @@ void ble_hid_demo_task(void *pvParameters);
 
 void ble_hid_demo_task(void *pvParameters) {
   int reconnect_counter = 0;
+  bool need_reconnect = false;
   
   while (1) {
     if (s_ble_is_connected) {
+      if (need_reconnect) {
+        // 如果之前标记了需要重连，但现在已经连接，重置标志
+        need_reconnect = false;
+        reconnect_counter = 0;
+        ESP_LOGI(TAG, "连接已恢复，重置重连计数器");
+      }
+      
       ESP_LOGI(TAG, "设备已连接，发送按键");
       
       // 测试普通按键
@@ -350,18 +358,27 @@ void ble_hid_demo_task(void *pvParameters) {
       vTaskDelay(200 / portTICK_PERIOD_MS);
       esp_hidd_send_modifier_key_value(0x02, 0x04, false);
       
-      // 如果多次尝试后仍然没有效果，尝试重新连接
+      // 如果多次尝试后仍然没有效果，标记需要重新连接
       reconnect_counter++;
-      if (reconnect_counter >= 3) {
-        ESP_LOGI(TAG, "多次尝试后仍无效果，尝试重新连接...");
-        // 断开连接并重新初始化
-        s_ble_is_connected = false;
-        // 重新开始广播
-        esp_hid_ble_gap_adv_start();
+      if (reconnect_counter >= 5) {  // 增加到5次
+        ESP_LOGI(TAG, "多次尝试后仍无效果，准备重新连接...");
+        // 不立即断开连接，只标记需要重连
+        need_reconnect = true;
+        
+        // 暂停一段时间，避免频繁尝试
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
         reconnect_counter = 0;
       }
     } else {
       ESP_LOGI(TAG, "设备未连接，等待连接...");
+      
+      // 如果需要重连且当前未连接，尝试重新开始广播
+      if (need_reconnect) {
+        ESP_LOGI(TAG, "尝试重新开始广播...");
+        esp_hid_ble_gap_adv_start();
+        need_reconnect = false;  // 重置标志
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+      }
     }
     
     // 增加延时，方便观察
@@ -440,9 +457,20 @@ static void ble_hidd_event_callback(void *handler_args, esp_event_base_t base,
                esp_hid_disconnect_reason_str(
                    esp_hidd_dev_transport_get(param->disconnect.dev),
                    param->disconnect.reason));
+      
+      // 添加更多调试信息
+      ESP_LOGI(TAG, "断开连接，原因: %d", param->disconnect.reason);
+      
+      // 关闭HID任务
       ble_hid_task_shut_down();
-      esp_hid_ble_gap_adv_start();
+      
+      // 设置连接状态
       s_ble_is_connected = false;
+      
+      // 延迟一段时间再重新开始广播
+      vTaskDelay(1000 / portTICK_PERIOD_MS);
+      ESP_LOGI(TAG, "重新开始广播...");
+      esp_hid_ble_gap_adv_start();
       break;
     }
     case ESP_HIDD_STOP_EVENT: {
@@ -803,8 +831,8 @@ void esp_hidd_send_key_value(uint8_t keycode, bool key_pressed) {
   ESP_LOGI(TAG, "键盘报告内容:");
   ESP_LOG_BUFFER_HEX(TAG, buf, HID_KEY_IN_RPT_LEN);
   
-  // 对于Mac，需要发送一个额外的空报告来表示按键释放
-  if (!key_pressed) {
+  // 对于Mac，只在按键释放时发送一个额外的空报告
+  if (!key_pressed && keycode != 0) {
     vTaskDelay(10 / portTICK_PERIOD_MS);
     memset(buf, 0, HID_KEY_IN_RPT_LEN);
     err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
@@ -834,8 +862,8 @@ void esp_hidd_send_modifier_key_value(uint8_t modifier, uint8_t keycode, bool ke
   ESP_LOGI(TAG, "组合键报告内容:");
   ESP_LOG_BUFFER_HEX(TAG, buf, HID_KEY_IN_RPT_LEN);
   
-  // 对于Mac，需要发送一个额外的空报告来表示按键释放
-  if (!key_pressed) {
+  // 对于Mac，只在按键释放时发送一个额外的空报告
+  if (!key_pressed && (modifier != 0 || keycode != 0)) {
     vTaskDelay(10 / portTICK_PERIOD_MS);
     memset(buf, 0, HID_KEY_IN_RPT_LEN);
     err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN, buf, HID_KEY_IN_RPT_LEN);
