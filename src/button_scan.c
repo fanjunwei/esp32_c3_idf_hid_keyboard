@@ -18,13 +18,13 @@ static const gpio_num_t col_pins[COL_NUM] = {
 
 // 按键映射到键码 (HID键码)
 // 按键矩阵布局:
-// | 1(0,0) | 2(0,1) | 3(0,2) |
-// | 4(1,0) | 5(1,1) | 6(1,2) |
-// | 7(2,0) | 8(2,1) | 9(2,2) |
+// | A(0,0) | B(0,1) | C(0,2) |
+// | D(1,0) | E(1,1) | F(1,2) |
+// | G(2,0) | H(2,1) | I(2,2) |
 static const uint8_t keycode_map[ROW_NUM][COL_NUM] = {
-    {0x04, 0x05, 0x06}, // A, B, C
-    {0x07, 0x08, 0x09}, // D, E, F
-    {0x0A, 0x0B, 0x0C}  // G, H, I
+    {0x52, 0x4F, 0x06}, // UP, RIGHT, C
+    {0x50, 0x08, 0x09}, // LEFT, E, F
+    {0x51, 0x0B, 0x0C}  // DOWN, H, I
 };
 
 void button_scan_init(void) {
