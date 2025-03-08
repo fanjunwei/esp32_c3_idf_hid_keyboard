@@ -29,6 +29,9 @@
 #include "esp_hid_gap.h"
 #include "esp_hidd.h"
 
+// 包含按键扫描头文件
+#include "button_scan.h"
+
 static const char *TAG = "HID_DEV_DEMO";
 
 typedef struct {
@@ -320,6 +323,13 @@ void ble_hid_demo_task(void *pvParameters) {
   int reconnect_counter = 0;
   bool need_reconnect = false;
   
+  // 初始化按键扫描
+  button_scan_init();
+  ESP_LOGI(TAG, "按键扫描初始化完成");
+  
+  // 上一次按键状态
+  button_state_t last_button = {false, 0, 0};
+  
   while (1) {
     if (s_ble_is_connected) {
       if (need_reconnect) {
@@ -329,39 +339,40 @@ void ble_hid_demo_task(void *pvParameters) {
         ESP_LOGI(TAG, "连接已恢复，重置重连计数器");
       }
       
-      ESP_LOGI(TAG, "设备已连接，发送按键");
+      ESP_LOGI(TAG, "test");
+      // 扫描按键
+      button_state_t button = scan_button();
       
-      // 测试普通按键
-      ESP_LOGI(TAG, "测试普通按键 A (0x04)");
-      esp_hidd_send_key_value(0x04, true);
-      vTaskDelay(200 / portTICK_PERIOD_MS);
-      esp_hidd_send_key_value(0x04, false);
-      vTaskDelay(1000 / portTICK_PERIOD_MS);
-      
-      // 测试空格键
-      ESP_LOGI(TAG, "测试空格键 SPACE (0x2C)");
-      esp_hidd_send_key_value(0x2C, true);
-      vTaskDelay(200 / portTICK_PERIOD_MS);
-      esp_hidd_send_key_value(0x2C, false);
-      vTaskDelay(1000 / portTICK_PERIOD_MS);
-      
-      // 测试组合键 Ctrl+A
-      ESP_LOGI(TAG, "测试组合键 Ctrl+A");
-      esp_hidd_send_modifier_key_value(0x01, 0x04, true);  // 左Ctrl(0x01) + A(0x04)
-      vTaskDelay(200 / portTICK_PERIOD_MS);
-      esp_hidd_send_modifier_key_value(0x01, 0x04, false);
-      vTaskDelay(1000 / portTICK_PERIOD_MS);
-      
-      // 测试组合键 Shift+A
-      ESP_LOGI(TAG, "测试组合键 Shift+A");
-      esp_hidd_send_modifier_key_value(0x02, 0x04, true);  // 左Shift(0x02) + A(0x04)
-      vTaskDelay(200 / portTICK_PERIOD_MS);
-      esp_hidd_send_modifier_key_value(0x02, 0x04, false);
+      // 如果有按键被按下，且与上次不同
+      if (button.pressed && 
+          (last_button.pressed == false || 
+           last_button.row != button.row || 
+           last_button.col != button.col)) {
+        
+        // 获取对应的键码
+        uint8_t keycode = get_keycode_from_button(button.row, button.col);
+        
+        // 发送按键
+        ESP_LOGI(TAG, "发送按键: 0x%02x (行=%d, 列=%d)", keycode, button.row, button.col);
+        esp_hidd_send_key_value(keycode, true);
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+        esp_hidd_send_key_value(keycode, false);
+        
+        // 更新上次按键状态
+        last_button = button;
+        
+        // 重置重连计数器
+        reconnect_counter = 0;
+      } 
+      // 如果没有按键被按下，但上次有
+      else if (!button.pressed && last_button.pressed) {
+        // 更新上次按键状态
+        last_button.pressed = false;
+      }
       
       // 如果多次尝试后仍然没有效果，标记需要重新连接
-      reconnect_counter++;
-      if (reconnect_counter >= 5) {  // 增加到5次
-        ESP_LOGI(TAG, "多次尝试后仍无效果，准备重新连接...");
+      if (reconnect_counter >= 50) {  // 增加到50次，约150秒
+        ESP_LOGI(TAG, "长时间无活动，准备重新连接...");
         // 不立即断开连接，只标记需要重连
         need_reconnect = true;
         
@@ -381,7 +392,10 @@ void ble_hid_demo_task(void *pvParameters) {
       }
     }
     
-    // 增加延时，方便观察
+    // 增加计数器
+    reconnect_counter++;
+    
+    // 短暂延时，避免CPU占用过高
     vTaskDelay(3000 / portTICK_PERIOD_MS);
   }
 }
