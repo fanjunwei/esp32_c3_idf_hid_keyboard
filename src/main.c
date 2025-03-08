@@ -879,12 +879,6 @@ void esp_hidd_send_keys(uint8_t *keycodes, uint8_t num_keys) {
   ESP_LOGI(TAG, "键盘报告内容:");
   ESP_LOG_BUFFER_HEX(TAG, buf, HID_KEY_IN_RPT_LEN);
   
-  // 发送空报告
-  vTaskDelay(10 / portTICK_PERIOD_MS);
-  memset(buf, 0, HID_KEY_IN_RPT_LEN);
-  err = esp_hidd_dev_input_set(s_ble_hid_param.hid_dev, 1, HID_RPT_ID_KEY_IN,
-                             buf, HID_KEY_IN_RPT_LEN);
-  ESP_LOGI(TAG, "Send empty report result: %s", esp_err_to_name(err));
 }
 
 // 添加发送带修饰键的组合键的函数
